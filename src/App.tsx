@@ -119,8 +119,6 @@ const DEFAULTS = {
 } as const;
 
 const BASE_GWPBIO: Record<number, number> = { 1: 0.95, 10: 0.85, 30: 0.7, 100: 0.5, 1000: 0.25 };
-const HORIZONS = [1, 10, 30, 100, 1000];
-
 function clamp(x: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, x));
 }
@@ -175,6 +173,7 @@ function WoodVsHeatApp() {
 
   const [heat, setHeat] = useState<HeatSourceId>("ASHP");
   const [annualHeatMWh, setAnnualHeatMWh] = useState<number>(10);
+  const [timeframeYears, setTimeframeYears] = useState<number>(25);
   const [gwpBioScale, setGwpBioScale] = useState<number>(100);
   const [copOverride, setCopOverride] = useState<string>("");
   const [districtCop, setDistrictCop] = useState<string>(String(DEFAULTS.district.cop));
@@ -406,6 +405,7 @@ function WoodVsHeatApp() {
   const gridSource = latestEntry ? "Ember monthly" : intensityError ? "baseline (error)" : "baseline";
 
   const recentHistory = hasSeries ? currentSeries.slice(-3).reverse() : [];
+  const validatedTimeframe = useMemo(() => Math.max(1, Math.round(timeframeYears)), [timeframeYears]);
 
   const activeCoordinates = country ? coordinates[country] : undefined;
   const mixSlices: MixSlice[] = useMemo(() => {
@@ -596,23 +596,24 @@ function WoodVsHeatApp() {
   };
 
   const rows = useMemo(() => {
-    return HORIZONS.map((horizon) => {
-      const { wood, comp, diff, diffPct } = cumulativeForHorizon(horizon, gridIntensity);
-      return {
+    const horizon = validatedTimeframe;
+    const { wood, comp, diff, diffPct } = cumulativeForHorizon(horizon, gridIntensity);
+    return [
+      {
         horizon,
         wood_t: wood / 1_000_000,
         comp_t: comp / 1_000_000,
         diff_t: diff / 1_000_000,
         diffPct,
-      };
-    });
-  }, [gridIntensity, annualHeatMWh, heat, effectiveCOP, gwpBioScale]);
+      },
+    ];
+  }, [validatedTimeframe, gridIntensity, annualHeatMWh, heat, effectiveCOP, gwpBioScale]);
 
   const selectedHeatLabel = HEAT_SOURCES.find((entry) => entry.id === heat)?.label ?? "Heat";
   const today = new Date().toISOString().slice(0, 10);
   const comparatorLabel = emissionsPerKWhHeatThisYear(gridIntensity).label;
-  const tenYearSnapshot = useMemo(() => {
-    const horizonYears = 10;
+  const timeframeSnapshot = useMemo(() => {
+    const horizonYears = validatedTimeframe;
     const totals = cumulativeForHorizon(horizonYears, gridIntensity);
     const totalKWh = annualHeatMWh * 1000 * horizonYears;
     if (totalKWh <= 0) {
@@ -625,13 +626,30 @@ function WoodVsHeatApp() {
       heatingPerKWh,
       diffPerKWh: heatingPerKWh - woodPerKWh,
     };
-  }, [annualHeatMWh, gridIntensity, heat, effectiveCOP, gwpBioScale]);
+  }, [annualHeatMWh, gridIntensity, heat, effectiveCOP, gwpBioScale, validatedTimeframe]);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
-        <header className="space-y-1">
+        <header className="space-y-2">
           <h1 className="text-3xl font-semibold">I&apos;m cold. Should I burn wood or use my heating system?</h1>
+          <p className="text-sm text-slate-600">
+            With today&apos;s electricity mix, is it better for the climate, over a
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={timeframeYears}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (Number.isFinite(next)) {
+                  setTimeframeYears(Math.max(1, next));
+                }
+              }}
+              className="mx-2 inline-flex h-7 w-16 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700 focus:border-slate-500 focus:outline-none"
+            />
+            -year time frame, to burn wood in a fireplace or turn up the heat?
+          </p>
           <p className="text-sm text-slate-600">Today: {today}</p>
         </header>
 
@@ -899,7 +917,7 @@ function WoodVsHeatApp() {
                   <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <h3 className="text-sm font-medium text-slate-800">Summary</h3>
                     <p className="mt-1 text-sm text-slate-600">
-                      Comparing wood stove against {selectedHeatLabel}. Table values assume {formatNumber(annualHeatMWh)} MWh/year and {comparatorLabel} emissions.
+                      Comparing wood stove against {selectedHeatLabel}. Table values assume {formatNumber(annualHeatMWh)} MWh/year, {comparatorLabel} emissions, and a {validatedTimeframe}-year timeframe.
                     </p>
                     <div className="mt-4 overflow-x-auto">
                       <table className="min-w-full text-sm">
@@ -936,7 +954,7 @@ function WoodVsHeatApp() {
 
           <div className="space-y-4">
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="text-base font-medium text-slate-800">10-year CO₂e snapshot</h2>
+              <h2 className="text-base font-medium text-slate-800">{validatedTimeframe}-year CO₂e snapshot</h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-3">
@@ -944,8 +962,8 @@ function WoodVsHeatApp() {
                     <h3 className="text-sm font-semibold text-slate-700">Wood CO₂e / kWh (g)</h3>
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
-                    <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(tenYearSnapshot.woodPerKWh, 1)}</div>
-                    <div className="text-xs text-slate-500">10-year horizon (biogenic timing applied)</div>
+                    <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(timeframeSnapshot.woodPerKWh, 1)}</div>
+                    <div className="text-xs text-slate-500">{validatedTimeframe}-year horizon (biogenic timing applied)</div>
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -954,20 +972,20 @@ function WoodVsHeatApp() {
                     <h3 className="text-sm font-semibold text-slate-700">{selectedHeatLabel} CO₂e / kWh (g)</h3>
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
-                    <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(tenYearSnapshot.heatingPerKWh, 1)}</div>
-                    <div className="text-xs text-slate-500">Average of 10-year Kyoto path</div>
+                    <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(timeframeSnapshot.heatingPerKWh, 1)}</div>
+                    <div className="text-xs text-slate-500">Average of {validatedTimeframe}-year Kyoto path</div>
                   </div>
                 </div>
               </div>
               <div className="mt-4 text-sm text-slate-600">
-                Difference (heating − wood, g/kWh):
+                Difference (heating − wood, g/kWh over {validatedTimeframe} years):
                 <span
                   className={`ml-1 font-semibold ${
-                    tenYearSnapshot.diffPerKWh > 0 ? "text-emerald-600" : tenYearSnapshot.diffPerKWh < 0 ? "text-rose-600" : "text-slate-700"
+                    timeframeSnapshot.diffPerKWh > 0 ? "text-emerald-600" : timeframeSnapshot.diffPerKWh < 0 ? "text-rose-600" : "text-slate-700"
                   }`}
                 >
-                  {tenYearSnapshot.diffPerKWh > 0 ? "+" : ""}
-                  {formatNumber(tenYearSnapshot.diffPerKWh, 1)}
+                  {timeframeSnapshot.diffPerKWh > 0 ? "+" : ""}
+                  {formatNumber(timeframeSnapshot.diffPerKWh, 1)}
                 </span>
               </div>
             </div>
