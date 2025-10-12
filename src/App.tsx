@@ -285,7 +285,7 @@ function WoodVsHeatApp() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/data/monthly_full_release_long_format.csv")
+    fetch(`${import.meta.env.BASE_URL}data/monthly_full_release_long_format.csv`)
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Failed to fetch CSV: ${response.status}`);
@@ -698,6 +698,8 @@ function WoodVsHeatApp() {
   const selectedHeatLabel = HEAT_SOURCES.find((entry) => entry.id === heat)?.label ?? "Heat";
   const today = new Date().toISOString().slice(0, 10);
   const comparatorLabel = comparator.label;
+  const fireplaceIcon = `${import.meta.env.BASE_URL}data/fireplace.png`;
+  const heaterIcon = `${import.meta.env.BASE_URL}data/heater.png`;
   const timeframeSnapshot = useMemo(() => {
     if (annualDemandKWh <= 0) {
       return { woodPerKWh: 0, heatingPerKWh: 0, diffPerKWh: 0 };
@@ -1026,7 +1028,7 @@ function WoodVsHeatApp() {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-3">
-                    <img src="/data/fireplace.png" alt="Wood heating" className="h-12 w-12 object-contain" />
+                    <img src={fireplaceIcon} alt="Wood heating" className="h-12 w-12 object-contain" />
                     <h3 className="text-sm font-semibold text-slate-700">Wood CO₂e / kWh (g)</h3>
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
@@ -1036,7 +1038,7 @@ function WoodVsHeatApp() {
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="flex items-center gap-3">
-                    <img src="/data/heater.png" alt={selectedHeatLabel} className="h-12 w-12 object-contain" />
+                    <img src={heaterIcon} alt={selectedHeatLabel} className="h-12 w-12 object-contain" />
                     <h3 className="text-sm font-semibold text-slate-700">{selectedHeatLabel} CO₂e / kWh (g)</h3>
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
