@@ -118,7 +118,34 @@ const DEFAULTS = {
   kyoto: { targetYear: 2050, targetGridIntensity_g_per_kWh: 50 },
 } as const;
 
-const BASE_GWPBIO: Record<number, number> = { 1: 0.95, 10: 0.85, 30: 0.7, 100: 0.5, 1000: 0.25 };
+const BASE_GWPBIO: Array<{ horizon: number; factor: number }> = [
+  { horizon: 1, factor: 0.95 },
+  { horizon: 10, factor: 0.85 },
+  { horizon: 30, factor: 0.7 },
+  { horizon: 100, factor: 0.5 },
+  { horizon: 1000, factor: 0.25 },
+];
+
+function gwpFactorForHorizon(horizon: number) {
+  const target = Math.max(1, horizon);
+  const first = BASE_GWPBIO[0];
+  const last = BASE_GWPBIO[BASE_GWPBIO.length - 1];
+  if (target <= first.horizon) return first.factor;
+  for (let i = 0; i < BASE_GWPBIO.length - 1; i += 1) {
+    const current = BASE_GWPBIO[i];
+    const next = BASE_GWPBIO[i + 1];
+    if (target >= current.horizon && target <= next.horizon) {
+      const span = next.horizon - current.horizon;
+      const ratio = span > 0 ? (target - current.horizon) / span : 0;
+      return current.factor + ratio * (next.factor - current.factor);
+    }
+  }
+  const prev = BASE_GWPBIO[BASE_GWPBIO.length - 2];
+  const span = last.horizon - prev.horizon;
+  const slope = span > 0 ? (last.factor - prev.factor) / span : 0;
+  const extrapolated = last.factor + slope * (target - last.horizon);
+  return Math.max(0, extrapolated);
+}
 function clamp(x: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, x));
 }
@@ -405,7 +432,10 @@ function WoodVsHeatApp() {
   const gridSource = latestEntry ? "Ember monthly" : intensityError ? "baseline (error)" : "baseline";
 
   const recentHistory = hasSeries ? currentSeries.slice(-3).reverse() : [];
-  const validatedTimeframe = useMemo(() => Math.max(1, Math.round(timeframeYears)), [timeframeYears]);
+  const validatedTimeframe = useMemo(
+    () => Math.min(10000, Math.max(1, Math.round(timeframeYears))),
+    [timeframeYears]
+  );
 
   const activeCoordinates = country ? coordinates[country] : undefined;
   const mixSlices: MixSlice[] = useMemo(() => {
@@ -560,7 +590,8 @@ function WoodVsHeatApp() {
   };
 
   const woodEmissions_g_per_kWh = (horizon: number) => {
-    const gwp = (BASE_GWPBIO[horizon] ?? 0.5) * (gwpBioScale / 100);
+    const gwpFactor = gwpFactorForHorizon(horizon);
+    const gwp = gwpFactor * (gwpBioScale / 100);
     const co2 = (DEFAULTS.wood.efCO2_fuel_g_per_kWh * gwp) / DEFAULTS.wood.stoveEff;
     const nonCO2 = DEFAULTS.wood.efCH4N2O_g_per_kWh / DEFAULTS.wood.stoveEff;
     return co2 + nonCO2;
@@ -628,6 +659,15 @@ function WoodVsHeatApp() {
     };
   }, [annualHeatMWh, gridIntensity, heat, effectiveCOP, gwpBioScale, validatedTimeframe]);
 
+  const gwpReference = useMemo(
+    () => ({
+      one: gwpFactorForHorizon(1),
+      thirty: gwpFactorForHorizon(30),
+      hundred: gwpFactorForHorizon(100),
+    }),
+    []
+  );
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
@@ -638,12 +678,13 @@ function WoodVsHeatApp() {
             <input
               type="number"
               min={1}
+              max={10000}
               step={1}
               value={timeframeYears}
               onChange={(event) => {
                 const next = Number(event.target.value);
                 if (Number.isFinite(next)) {
-                  setTimeframeYears(Math.max(1, next));
+                  setTimeframeYears(Math.min(10000, Math.max(1, next)));
                 }
               }}
               className="mx-2 inline-flex h-7 w-16 items-center justify-center rounded-md border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700 focus:border-slate-500 focus:outline-none"
@@ -716,8 +757,8 @@ function WoodVsHeatApp() {
                     <h3 className="text-sm font-medium text-slate-800">How the math works</h3>
                     <ul className="mt-3 list-disc space-y-2 pl-5 text-xs text-slate-600">
                       <li>
-                        Wood emissions = ((403 g CO₂ × GWPbio factor) + 30 g CH₄/N₂O) ÷ stove efficiency. GWPbio factors scale with the slider and follow default residues timing (1–1000y).
-                      </li>
+                        Wood emissions = ((403 g CO₂ × interpolated GWPbio factor) + 30 g CH₄/N₂O) ÷ stove efficiency. The GWPbio curve interpolates IPCC residues values from 1 → 1000 years and linearly extends beyond (approaching neutrality around 1900 years).
+                     </li>
                       <li>
                         Electric heat emissions = grid intensity ÷ COP. Resistive heating uses COP 1; district heating uses the entered COP. Gas and oil emissions divide the default fuel factors by boiler efficiency.
                       </li>
@@ -725,7 +766,7 @@ function WoodVsHeatApp() {
                         Kyoto path linearly declines from today’s grid intensity toward {DEFAULTS.kyoto.targetGridIntensity_g_per_kWh} g/kWh_e by {DEFAULTS.kyoto.targetYear}; cumulative totals sum annual emissions across the chosen horizon.
                       </li>
                       <li>
-                        Ten-year snapshot averages wood and comparison emissions over 10 × annual demand (in kWh_heat) to show per-kWh CO₂e with all timing adjustments applied.
+                        Timeframe snapshot divides cumulative totals over the selected years and annual demand to give per‑kWh CO₂e with the chosen biogenic timing.
                       </li>
                     </ul>
                   </div>
@@ -892,7 +933,12 @@ function WoodVsHeatApp() {
                           value={gwpBioScale}
                           onChange={(event) => setGwpBioScale(Number(event.target.value))}
                         />
-                        <span className="text-xs text-slate-600">{gwpBioScale}% of base factors (1y {BASE_GWPBIO[1]}, 30y {BASE_GWPBIO[30]}, 100y {BASE_GWPBIO[100]})</span>
+                        <span className="text-xs text-slate-600">
+                          {gwpBioScale}% of base factors (1y {formatNumber(gwpReference.one, 2)}, 30y {formatNumber(gwpReference.thirty, 2)}, 100y {formatNumber(gwpReference.hundred, 2)}; 1000y 0.25, tapering toward zero ≈1900y)
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          The slider scales the IPCC residues curve; we linearly interpolate between tabulated horizons (1–1000y) and extend that slope beyond, so timeframes past ~1900 years effectively reach carbon neutrality.
+                        </span>
                       </label>
                       <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
                         <div className="flex items-center gap-2 font-semibold text-slate-700">
