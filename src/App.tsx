@@ -104,6 +104,8 @@ const MIX_COLORS: Record<MixCategory, string> = {
   Other: "#94a3b8",
 };
 
+type Biome = "boreal" | "temperate" | "tropical" | "arid";
+
 const DEFAULTS = {
   wood: {
     efCO2_fuel_g_per_kWh: 403,
@@ -115,37 +117,101 @@ const DEFAULTS = {
   district: { cop: 2.5 },
   gshp: { baseCOP: 4 },
   ashp: { a: 2.8, b: 0.06, min: 1.8, max: 5 },
-  kyoto: { targetYear: 2050, targetGridIntensity_g_per_kWh: 50 },
 } as const;
 
-const BASE_GWPBIO: Array<{ horizon: number; factor: number }> = [
-  { horizon: 1, factor: 0.95 },
-  { horizon: 10, factor: 0.85 },
-  { horizon: 30, factor: 0.7 },
-  { horizon: 100, factor: 0.5 },
-  { horizon: 1000, factor: 0.25 },
-];
+const GWPBIO_TABLE: Record<Biome, Array<{ horizon: number; factor: number }>> = {
+  boreal: [
+    { horizon: 20, factor: 0.9 },
+    { horizon: 30, factor: 0.85 },
+    { horizon: 100, factor: 0.6 },
+    { horizon: 1000, factor: 0.3 },
+  ],
+  temperate: [
+    { horizon: 20, factor: 0.8 },
+    { horizon: 30, factor: 0.7 },
+    { horizon: 100, factor: 0.5 },
+    { horizon: 1000, factor: 0.25 },
+  ],
+  tropical: [
+    { horizon: 20, factor: 0.5 },
+    { horizon: 30, factor: 0.4 },
+    { horizon: 100, factor: 0.3 },
+    { horizon: 1000, factor: 0.15 },
+  ],
+  arid: [
+    { horizon: 20, factor: 0.95 },
+    { horizon: 30, factor: 0.9 },
+    { horizon: 100, factor: 0.7 },
+    { horizon: 1000, factor: 0.35 },
+  ],
+};
 
-function gwpFactorForHorizon(horizon: number) {
-  const target = Math.max(1, horizon);
-  const first = BASE_GWPBIO[0];
-  const last = BASE_GWPBIO[BASE_GWPBIO.length - 1];
-  if (target <= first.horizon) return first.factor;
-  for (let i = 0; i < BASE_GWPBIO.length - 1; i += 1) {
-    const current = BASE_GWPBIO[i];
-    const next = BASE_GWPBIO[i + 1];
-    if (target >= current.horizon && target <= next.horizon) {
-      const span = next.horizon - current.horizon;
-      const ratio = span > 0 ? (target - current.horizon) / span : 0;
-      return current.factor + ratio * (next.factor - current.factor);
-    }
+const ISO2_TO_BIOME: Record<string, Biome> = {
+  DE: "temperate", FR: "temperate", PL: "temperate", NL: "temperate",
+  BE: "temperate", LU: "temperate", DK: "temperate",
+  SE: "boreal", FI: "boreal", NO: "boreal", EE: "boreal", LV: "boreal", LT: "boreal",
+  IE: "temperate", GB: "temperate", IS: "boreal",
+  ES: "temperate", PT: "temperate", IT: "temperate", GR: "temperate",
+  AT: "temperate", CH: "temperate", CZ: "temperate", SK: "temperate",
+  HU: "temperate", SI: "temperate", HR: "temperate", RO: "temperate",
+  BG: "temperate", RS: "temperate", BA: "temperate", MK: "temperate",
+  UA: "temperate", BY: "boreal", MD: "temperate",
+  RU: "boreal",
+  US: "temperate", CA: "boreal", MX: "tropical",
+  BR: "tropical", AR: "temperate", CL: "temperate", PE: "tropical",
+  CO: "tropical", VE: "tropical", EC: "tropical", BO: "tropical",
+  UY: "temperate", PY: "tropical", GY: "tropical", SR: "tropical",
+  CN: "temperate", JP: "temperate", KR: "temperate", MN: "boreal",
+  IN: "tropical", BD: "tropical", PK: "temperate", NP: "temperate",
+  LK: "tropical", MM: "tropical", TH: "tropical", VN: "tropical",
+  LA: "tropical", KH: "tropical", MY: "tropical", SG: "tropical",
+  ID: "tropical", PH: "tropical",
+  AU: "temperate", NZ: "temperate",
+  ZA: "temperate", NA: "arid", BW: "arid", MZ: "tropical",
+  TZ: "tropical", KE: "tropical", UG: "tropical", ET: "tropical",
+  NG: "tropical", GH: "tropical", CI: "tropical", CM: "tropical",
+  CD: "tropical", GA: "tropical", CG: "tropical",
+  DZ: "arid", MA: "arid", TN: "arid", EG: "arid", SA: "arid",
+  IR: "temperate", IQ: "arid", TR: "temperate",
+};
+
+const ISO2_TO_ISO3: Record<string, string> = {
+  DE: "DEU", FR: "FRA", PL: "POL", NL: "NLD",
+  BE: "BEL", LU: "LUX", DK: "DNK",
+  SE: "SWE", FI: "FIN", NO: "NOR", EE: "EST", LV: "LVA", LT: "LTU",
+  IE: "IRL", GB: "GBR", IS: "ISL",
+  ES: "ESP", PT: "PRT", IT: "ITA", GR: "GRC",
+  AT: "AUT", CH: "CHE", CZ: "CZE", SK: "SVK",
+  HU: "HUN", SI: "SVN", HR: "HRV", RO: "ROU",
+  BG: "BGR", RS: "SRB", BA: "BIH", MK: "MKD",
+  UA: "UKR", BY: "BLR", MD: "MDA",
+  RU: "RUS",
+  US: "USA", CA: "CAN", MX: "MEX",
+  BR: "BRA", AR: "ARG", CL: "CHL", PE: "PER",
+  CO: "COL", VE: "VEN", EC: "ECU", BO: "BOL",
+  UY: "URY", PY: "PRY", GY: "GUY", SR: "SUR",
+  CN: "CHN", JP: "JPN", KR: "KOR", MN: "MNG",
+  IN: "IND", BD: "BGD", PK: "PAK", NP: "NPL",
+  LK: "LKA", MM: "MMR", TH: "THA", VN: "VNM",
+  LA: "LAO", KH: "KHM", MY: "MYS", SG: "SGP",
+  ID: "IDN", PH: "PHL",
+  AU: "AUS", NZ: "NZL",
+  ZA: "ZAF", NA: "NAM", BW: "BWA", MZ: "MOZ",
+  TZ: "TZA", KE: "KEN", UG: "UGA", ET: "ETH",
+  NG: "NGA", GH: "GHA", CI: "CIV", CM: "CMR",
+  CD: "COD", GA: "GAB", CG: "COG",
+  DZ: "DZA", MA: "MAR", TN: "TUN", EG: "EGY", SA: "SAU",
+  IR: "IRN", IQ: "IRQ", TR: "TUR",
+};
+
+const ISO3_TO_BIOME: Record<string, Biome> = {};
+Object.entries(ISO2_TO_BIOME).forEach(([iso2, biome]) => {
+  const iso3 = ISO2_TO_ISO3[iso2];
+  if (iso3) {
+    ISO3_TO_BIOME[iso3] = biome;
   }
-  const prev = BASE_GWPBIO[BASE_GWPBIO.length - 2];
-  const span = last.horizon - prev.horizon;
-  const slope = span > 0 ? (last.factor - prev.factor) / span : 0;
-  const extrapolated = last.factor + slope * (target - last.horizon);
-  return Math.max(0, extrapolated);
-}
+});
+
 function clamp(x: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, x));
 }
@@ -159,24 +225,31 @@ function gshpCOP() {
   return DEFAULTS.gshp.baseCOP;
 }
 
-function gridIntensityPath(
-  currentYear: number,
-  horizonYears: number,
-  currentIntensity: number,
-  targetYear: number,
-  targetIntensity: number
-) {
-  const arr: number[] = [];
-  for (let i = 0; i < horizonYears; i += 1) {
-    const year = currentYear + i;
-    if (year >= targetYear) {
-      arr.push(targetIntensity);
-    } else {
-      const frac = (targetYear - year) / (targetYear - currentYear);
-      arr.push(targetIntensity + (currentIntensity - targetIntensity) * frac);
+function gwpBioForHorizon(iso3: string, horizonYears: number) {
+  const biome = ISO3_TO_BIOME[iso3] ?? "temperate";
+  const table = (GWPBIO_TABLE[biome] ?? GWPBIO_TABLE.temperate).slice().sort((a, b) => a.horizon - b.horizon);
+  const target = Math.max(1, horizonYears);
+  if (target <= table[0].horizon) {
+    const next = table[1];
+    const span = next.horizon - table[0].horizon;
+    const slope = span > 0 ? (next.factor - table[0].factor) / span : 0;
+    return table[0].factor + slope * (target - table[0].horizon);
+  }
+  for (let i = 0; i < table.length - 1; i += 1) {
+    const current = table[i];
+    const next = table[i + 1];
+    if (target <= next.horizon) {
+      const span = next.horizon - current.horizon;
+      const ratio = span > 0 ? (target - current.horizon) / span : 0;
+      return current.factor + ratio * (next.factor - current.factor);
     }
   }
-  return arr;
+  const last = table[table.length - 1];
+  const prev = table[table.length - 2];
+  const span = last.horizon - prev.horizon;
+  const slope = span > 0 ? (last.factor - prev.factor) / span : 0;
+  const extrapolated = last.factor + slope * (target - last.horizon);
+  return Math.max(0, extrapolated);
 }
 
 function formatNumber(x: number, digits = 0) {
@@ -201,7 +274,6 @@ function WoodVsHeatApp() {
   const [heat, setHeat] = useState<HeatSourceId>("ASHP");
   const [annualHeatMWh, setAnnualHeatMWh] = useState<number>(10);
   const [timeframeYears, setTimeframeYears] = useState<number>(25);
-  const [gwpBioScale, setGwpBioScale] = useState<number>(100);
   const [copOverride, setCopOverride] = useState<string>("");
   const [districtCop, setDistrictCop] = useState<string>(String(DEFAULTS.district.cop));
 
@@ -425,6 +497,7 @@ function WoodVsHeatApp() {
   const hasSeries = currentSeries.length > 0;
   const countryMix = country ? energyMix[country] : undefined;
   const countryIntensity = country ? mixIntensity[country] : undefined;
+  const countryBiome = ISO3_TO_BIOME[country as string] ?? "temperate";
   const baselineIntensity = country ? BASELINE_GRID_INTENSITY[country] ?? DEFAULT_BASELINE_INTENSITY : DEFAULT_BASELINE_INTENSITY;
   const latestEntry = hasSeries ? currentSeries[currentSeries.length - 1] : null;
   const gridIntensity = latestEntry ? latestEntry.value : baselineIntensity;
@@ -589,84 +662,52 @@ function WoodVsHeatApp() {
     }
   };
 
-  const woodEmissions_g_per_kWh = (horizon: number) => {
-    const gwpFactor = gwpFactorForHorizon(horizon);
-    const gwp = gwpFactor * (gwpBioScale / 100);
-    const co2 = (DEFAULTS.wood.efCO2_fuel_g_per_kWh * gwp) / DEFAULTS.wood.stoveEff;
-    const nonCO2 = DEFAULTS.wood.efCH4N2O_g_per_kWh / DEFAULTS.wood.stoveEff;
-    return co2 + nonCO2;
-  };
+  const woodPerKWh = useMemo(() => {
+    const gwp = gwpBioForHorizon(country, validatedTimeframe);
+    const numerator = DEFAULTS.wood.efCO2_fuel_g_per_kWh * gwp + DEFAULTS.wood.efCH4N2O_g_per_kWh;
+    return numerator / DEFAULTS.wood.stoveEff;
+  }, [country, validatedTimeframe]);
 
-  const intensityPathForHorizon = (horizon: number, todayIntensity: number) => {
-    const now = new Date();
-    const year = now.getFullYear();
-    return gridIntensityPath(
-      year,
-      horizon,
-      todayIntensity,
-      DEFAULTS.kyoto.targetYear,
-      DEFAULTS.kyoto.targetGridIntensity_g_per_kWh
-    );
-  };
+  const comparator = useMemo(
+    () => emissionsPerKWhHeatThisYear(gridIntensity),
+    [gridIntensity, heat, effectiveCOP]
+  );
 
-  const cumulativeForHorizon = (horizon: number, todayIntensity: number) => {
-    const annualKWh = annualHeatMWh * 1000;
-    const path = intensityPathForHorizon(horizon, todayIntensity);
-    let comp = 0;
-    let wood = 0;
-    const woodPerKWh = woodEmissions_g_per_kWh(horizon);
-    for (let i = 0; i < horizon; i += 1) {
-      const gridValue = path[i];
-      const { comparator: eComp } = emissionsPerKWhHeatThisYear(gridValue);
-      comp += eComp * annualKWh;
-      wood += woodPerKWh * annualKWh;
-    }
-    const diff = comp - wood;
-    const diffPct = comp > 0 ? (diff / comp) * 100 : 0;
-    return { wood, comp, diff, diffPct };
-  };
+  const annualDemandKWh = annualHeatMWh * 1000;
+  const timeframeTotals = useMemo(() => {
+    const wood = woodPerKWh * annualDemandKWh;
+    const heating = comparator.comparator * annualDemandKWh;
+    const diff = heating - wood;
+    const diffPct = heating > 0 ? (diff / heating) * 100 : 0;
+    return { wood, heating, diff, diffPct };
+  }, [annualDemandKWh, woodPerKWh, comparator]);
 
-  const rows = useMemo(() => {
-    const horizon = validatedTimeframe;
-    const { wood, comp, diff, diffPct } = cumulativeForHorizon(horizon, gridIntensity);
-    return [
+  const rows = useMemo(
+    () => [
       {
-        horizon,
-        wood_t: wood / 1_000_000,
-        comp_t: comp / 1_000_000,
-        diff_t: diff / 1_000_000,
-        diffPct,
+        horizon: validatedTimeframe,
+        wood_t: timeframeTotals.wood / 1_000_000,
+        comp_t: timeframeTotals.heating / 1_000_000,
+        diff_t: timeframeTotals.diff / 1_000_000,
+        diffPct: timeframeTotals.diffPct,
       },
-    ];
-  }, [validatedTimeframe, gridIntensity, annualHeatMWh, heat, effectiveCOP, gwpBioScale]);
+    ],
+    [validatedTimeframe, timeframeTotals]
+  );
 
   const selectedHeatLabel = HEAT_SOURCES.find((entry) => entry.id === heat)?.label ?? "Heat";
   const today = new Date().toISOString().slice(0, 10);
-  const comparatorLabel = emissionsPerKWhHeatThisYear(gridIntensity).label;
+  const comparatorLabel = comparator.label;
   const timeframeSnapshot = useMemo(() => {
-    const horizonYears = validatedTimeframe;
-    const totals = cumulativeForHorizon(horizonYears, gridIntensity);
-    const totalKWh = annualHeatMWh * 1000 * horizonYears;
-    if (totalKWh <= 0) {
+    if (annualDemandKWh <= 0) {
       return { woodPerKWh: 0, heatingPerKWh: 0, diffPerKWh: 0 };
     }
-    const woodPerKWh = totals.wood / totalKWh;
-    const heatingPerKWh = totals.comp / totalKWh;
     return {
       woodPerKWh,
-      heatingPerKWh,
-      diffPerKWh: heatingPerKWh - woodPerKWh,
+      heatingPerKWh: comparator.comparator,
+      diffPerKWh: comparator.comparator - woodPerKWh,
     };
-  }, [annualHeatMWh, gridIntensity, heat, effectiveCOP, gwpBioScale, validatedTimeframe]);
-
-  const gwpReference = useMemo(
-    () => ({
-      one: gwpFactorForHorizon(1),
-      thirty: gwpFactorForHorizon(30),
-      hundred: gwpFactorForHorizon(100),
-    }),
-    []
-  );
+  }, [annualDemandKWh, woodPerKWh, comparator]);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -753,24 +794,6 @@ function WoodVsHeatApp() {
               </div>
               {advancedOpen && (
                 <div className="mt-4 space-y-4 text-sm">
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <h3 className="text-sm font-medium text-slate-800">How the math works</h3>
-                    <ul className="mt-3 list-disc space-y-2 pl-5 text-xs text-slate-600">
-                      <li>
-                        Wood emissions = ((403 g CO₂ × interpolated GWPbio factor) + 30 g CH₄/N₂O) ÷ stove efficiency. The GWPbio curve interpolates IPCC residues values from 1 → 1000 years and linearly extends beyond (approaching neutrality around 1900 years).
-                     </li>
-                      <li>
-                        Electric heat emissions = grid intensity ÷ COP. Resistive heating uses COP 1; district heating uses the entered COP. Gas and oil emissions divide the default fuel factors by boiler efficiency.
-                      </li>
-                      <li>
-                        Kyoto path linearly declines from today’s grid intensity toward {DEFAULTS.kyoto.targetGridIntensity_g_per_kWh} g/kWh_e by {DEFAULTS.kyoto.targetYear}; cumulative totals sum annual emissions across the chosen horizon.
-                      </li>
-                      <li>
-                        Timeframe snapshot divides cumulative totals over the selected years and annual demand to give per‑kWh CO₂e with the chosen biogenic timing.
-                      </li>
-                    </ul>
-                  </div>
-
                   <div className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-sm">
                     Why does burning wood for heat lose out so often, even compared to fossil fuels, even though it is a closed-cycle renewable
                     resource? Don&apos;t trees regrow, soaking carbon from the air? True, but: when you burn wood, you dump decades of stored carbon
@@ -781,11 +804,29 @@ function WoodVsHeatApp() {
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <h3 className="text-sm font-medium text-slate-800">How the math works</h3>
+                    <ul className="mt-3 list-disc space-y-2 pl-5 text-xs text-slate-600">
+                      <li>
+                        Wood emissions per kWh_heat = (403 g CO₂ × GWPbio(H) + 30 g CH₄/N₂O) ÷ 0.75 stove efficiency. GWPbio(H) reflects how much of today&apos;s biogenic CO₂ remains in the atmosphere after H years based on the country&apos;s biome (values at 20, 30, 100, 1000 years from the IPCC residues study, linearly interpolated for other horizons).
+                      </li>
+                      <li>
+                        Alternate heating emits grid_CO₂ ÷ COP for electric options (COP from today&apos;s temperature or overrides); resistive heat assumes COP 1; gas and oil use their default fuel factors divided by boiler efficiency.
+                      </li>
+                      <li>
+                        Totals are simply each option’s per-kWh CO₂e today multiplied by this season’s heating demand—no projections or future grid changes are considered.
+                      </li>
+                      <li>
+                        The timeframe snapshot and table report per-kWh CO₂e and single-season totals (tCO₂e) using that demand.
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <h3 className="text-sm font-medium text-slate-800">Grid data</h3>
                     <div className="mt-3 flex flex-col gap-3 text-sm text-slate-700">
                       <p>
-                        Bundled Ember monthly CSV loads automatically; {availableCountries.length} country
-                        {availableCountries.length === 1 ? "" : "ies"} detected.
+                        Electricity mix and intensity come from Ember&apos;s 2024-2025 monthly dataset bundled with the app; {availableCountries.length} country
+                        {availableCountries.length === 1 ? "" : "ies"} are covered.
                       </p>
                       <p className="text-xs text-slate-600">
                         Current grid intensity: {formatNumber(gridIntensity)} g/kWh_e ({gridSource}
@@ -920,50 +961,31 @@ function WoodVsHeatApp() {
                     />
                   </label>
 
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <h3 className="text-sm font-medium text-slate-800">Biogenic CO₂ timing</h3>
-                    <div className="mt-3 flex flex-col gap-3">
-                      <label className="flex flex-col gap-2">
-                        <span className="font-medium text-slate-700">GWPbio scaling</span>
-                        <input
-                          type="range"
-                          min={25}
-                          max={150}
-                          step={5}
-                          value={gwpBioScale}
-                          onChange={(event) => setGwpBioScale(Number(event.target.value))}
-                        />
-                        <span className="text-xs text-slate-600">
-                          {gwpBioScale}% of base factors (1y {formatNumber(gwpReference.one, 2)}, 30y {formatNumber(gwpReference.thirty, 2)}, 100y {formatNumber(gwpReference.hundred, 2)}; 1000y 0.25, tapering toward zero ≈1900y)
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          The slider scales the IPCC residues curve; we linearly interpolate between tabulated horizons (1–1000y) and extend that slope beyond, so timeframes past ~1900 years effectively reach carbon neutrality.
-                        </span>
-                      </label>
-                      <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
-                        <div className="flex items-center gap-2 font-semibold text-slate-700">
-                          <Info size={14} />
-                          <span>Assumptions</span>
-                        </div>
-                        <ul className="mt-2 list-disc space-y-1 pl-4">
-                          <li>
-                            Wood: 403 g CO₂ + 30 g CH₄/N₂O per kWh_fuel, stove efficiency 0.75.
-                          </li>
-                          <li>
-                            Gas: 202 g CO₂ per kWh_fuel, boiler efficiency 0.92; Oil: 267 g CO₂, efficiency 0.90.
-                          </li>
-                          <li>
-                            Kyoto path to {DEFAULTS.kyoto.targetGridIntensity_g_per_kWh} g/kWh_e by {DEFAULTS.kyoto.targetYear}.
-                          </li>
-                        </ul>
-                      </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-sm">
+                    <div className="flex items-center gap-2 font-semibold text-slate-700">
+                      <Info size={14} />
+                      <span>Key assumptions</span>
                     </div>
+                    <ul className="mt-2 list-disc space-y-1 pl-4">
+                      <li>
+                        Wood: 403 g CO₂ + 30 g CH₄/N₂O per kWh_fuel with 0.75 stove efficiency, scaled by the selected biome&apos;s GWPbio({validatedTimeframe}) (interpolated between 20, 30, 100, 1000 years). Current biome: {countryBiome} → factor ≈ {formatNumber(gwpBioForHorizon(country, validatedTimeframe), 2)}.
+                      </li>
+                      <li>
+                        Electric: current grid intensity applied uniformly; ASHP/GSHP use modeled COP from today&apos;s temperature (or overrides); resistive assumes COP 1.
+                      </li>
+                      <li>
+                        Outside temperature data comes from Open-Meteo lookup for the selected country; override COP values if you have measured performance.
+                      </li>
+                      <li>
+                        Gas/Oil: default fuel factors divided by boiler efficiency; district heat uses the user-supplied COP.
+                      </li>
+                    </ul>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <h3 className="text-sm font-medium text-slate-800">Summary</h3>
                     <p className="mt-1 text-sm text-slate-600">
-                      Comparing wood stove against {selectedHeatLabel}. Table values assume {formatNumber(annualHeatMWh)} MWh/year, {comparatorLabel} emissions, and a {validatedTimeframe}-year timeframe.
+                      Comparing wood stove against {selectedHeatLabel}. Table values assume {formatNumber(annualHeatMWh)} MWh of useful heat this season, {comparatorLabel} emissions for the alternate system, and a {validatedTimeframe}-year GWPbio horizon for wood.
                     </p>
                     <div className="mt-4 overflow-x-auto">
                       <table className="min-w-full text-sm">
@@ -1009,7 +1031,7 @@ function WoodVsHeatApp() {
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
                     <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(timeframeSnapshot.woodPerKWh, 1)}</div>
-                    <div className="text-xs text-slate-500">{validatedTimeframe}-year horizon (biogenic timing applied)</div>
+                    <div className="text-xs text-slate-500">Evaluated over {validatedTimeframe} years with biome-specific GWPbio</div>
                   </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1019,12 +1041,12 @@ function WoodVsHeatApp() {
                   </div>
                   <div className="mt-3 flex flex-col gap-2">
                     <div className="text-3xl font-semibold leading-none text-slate-800">{formatNumber(timeframeSnapshot.heatingPerKWh, 1)}</div>
-                    <div className="text-xs text-slate-500">Average of {validatedTimeframe}-year Kyoto path</div>
+                    <div className="text-xs text-slate-500">Per-kWh impact at today&apos;s grid intensity</div>
                   </div>
                 </div>
               </div>
               <div className="mt-4 text-sm text-slate-600">
-                Difference (heating − wood, g/kWh over {validatedTimeframe} years):
+                Difference (heating − wood, g/kWh):
                 <span
                   className={`ml-1 font-semibold ${
                     timeframeSnapshot.diffPerKWh > 0 ? "text-emerald-600" : timeframeSnapshot.diffPerKWh < 0 ? "text-rose-600" : "text-slate-700"
@@ -1035,17 +1057,6 @@ function WoodVsHeatApp() {
                 </span>
               </div>
             </div>
-
-            {advancedOpen && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 className="text-base font-medium text-slate-800">Notes</h2>
-                <ul className="mt-3 list-disc space-y-2 pl-4 text-sm text-slate-600">
-                  <li>All countries present in the bundled Ember CSV are selectable; latest 12 months drive the comparison.</li>
-                  <li>Outside temperature comes from Open-Meteo geocoding + forecast; override COP if you have metered data.</li>
-                  <li>Kyoto path linearly reduces electricity emissions from today&apos;s value to the 2050 target.</li>
-                </ul>
-              </div>
-            )}
           </div>
         </section>
       </main>
